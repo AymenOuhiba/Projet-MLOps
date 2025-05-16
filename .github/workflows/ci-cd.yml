@@ -1,4 +1,4 @@
-name: CI/CD Streamlit
+name: CI/CD
 
 on:
   push:
