@@ -1,0 +1,175 @@
+x-airflow-common:
+  &airflow-common
+  image: custom-airflow:latest
+  environment: &env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: CEST
+    AIRFLOW__API__ACCESS_CONTROL_ALLOW_HEADERS: 'content-type, origin, authorization, accept'
+    AIRFLOW__API__ACCESS_CONTROL_ALLOW_METHODS: 'GET, POST, OPTIONS, DELETE'
+    AIRFLOW__API__ACCESS_CONTROL_ALLOW_ORIGINS: '*'
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${DB_USER}:${DB_PASS}@postgres:${DB_PORT}/${DB_NAME}
+    DOCKER_ENV: "true"
+    MINIO_HOST: ${MINIO_HOST_DAG}
+    MINIO_ROOT_USER: ${MINIO_USER}
+    MINIO_ROOT_PASSWORD: ${MINIO_PASS}
+  volumes:
+    - .:/sources
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+  user: "${AIRFLOW_UID}:0"
+  depends_on: &deps
+    postgres:
+      condition: service_healthy
+    minio:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:14-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_USER}
+      POSTGRES_DB: ${DB_NAME}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    restart: always
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - airflow_network
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    restart: always
+    environment:
+      MINIO_HOST: ${MINIO_HOST_DAG}
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASS}
+    command: 'minio server /data --console-address ":${MINIO_PORT_UI}"'
+    ports:
+      - "${MINIO_PORT_API}:${MINIO_PORT_API}"
+      - "${MINIO_PORT_UI}:${MINIO_PORT_UI}"
+    volumes:
+      - minio_data:/data
+    networks:
+      - airflow_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${MINIO_PORT_API}/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "${AIRFLOW_PORT_UI}:${AIRFLOW_PORT_UI}"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:${AIRFLOW_PORT_UI}/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+    depends_on:
+      <<: *deps
+      airflow-init:
+        condition: service_completed_successfully
+    networks:
+      - airflow_network
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+    depends_on:
+      <<: *deps
+      airflow-init:
+        condition: service_completed_successfully
+    networks:
+      - airflow_network
+
+  airflow-triggerer:
+    <<: *airflow-common
+    command: triggerer
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+    depends_on:
+      <<: *deps
+      airflow-init:
+        condition: service_completed_successfully
+    networks:
+      - airflow_network
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /sources/airflow/logs /sources/airflow/dags /sources/airflow/plugins
+        chown -R "${AIRFLOW_UID}:0" /sources/airflow/{logs,dags,plugins}
+        chmod -R 755 /sources/airflow/{logs,dags,plugins}
+        exec /entrypoint airflow version
+    environment:
+      <<: *env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_USER}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_PASS}
+      _PIP_ADDITIONAL_REQUIREMENTS: ''
+    user: "0:0"
+    networks:
+      - airflow_network
+
+  airflow-cli:
+    <<: *airflow-common
+    profiles: [debug]
+    environment:
+      <<: *env
+      CONNECTION_CHECK_MAX_COUNT: "0"
+    command: ["bash", "-c", "airflow"]
+    networks:
+      - airflow_network
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      MINIO_HOST_DAG: ${MINIO_HOST_DAG}
+      MINIO_USER: ${MINIO_USER}
+      MINIO_PASS: ${MINIO_PASS}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      DOCKER_ENV: "true"
+    depends_on:
+      - minio
+    networks:
+      - airflow_network
+
+volumes:
+  minio_data:
+  postgres_data:
+
+networks:
+  airflow_network:
+    driver: bridge
