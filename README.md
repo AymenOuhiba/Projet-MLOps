@@ -22,11 +22,13 @@ Ce projet met en place un pipeline MLOps complet visant à :
 ```
 projet-mlops
 │
-├── dags.py                  # DAG Airflow
-├── fonctions.py             # Fonctions d'importation et stockage
-├── randomforest.py          # Entraînement du modèle Random Forest
+└── airflow/dags/
+    └── dags.py              # DAG Airflow
+    └──fonctions.py          # Fonctions d'importation et stockage
+    └──randomforest.py       # Entraînement du modèle Random Forest
 ├── app.py                   # Interface utilisateur Streamlit
-├── test_airflow.py          # Tests unitaires
+└── tests/
+    └── test_airflow.py      # Tests unitaires
 ├── docker-compose.yaml      # Stack de services
 ├── Dockerfile               # Image pour Airflow
 ├── Dockerfile.streamlit     # Image pour Streamlit
