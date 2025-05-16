@@ -24,8 +24,8 @@ projet-mlops
 │
 └── airflow/dags/
     └── dags.py              # DAG Airflow
-    └──fonctions.py          # Fonctions d'importation et stockage
-    └──randomforest.py       # Entraînement du modèle Random Forest
+    └── fonctions.py         # Fonctions d'importation et stockage
+    └── randomforest.py      # Entraînement du modèle Random Forest
 ├── app.py                   # Interface utilisateur Streamlit
 └── tests/
     └── test_airflow.py      # Tests unitaires
